@@ -1,0 +1,297 @@
+---
+title: "Which Country Is Happier?"
+author: "Jaime Ponce & Yuki Yu"
+date: "15th of May, 2018"
+output: 
+  html_document:
+    toc: true
+    toc_float: false
+    code_folding: hide
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(gdata)
+df <- read.xls("WHR2018Chapter2OnlineData.xls", sheet = 1)
+df2 <- read.xls("WHR2018Chapter2OnlineData.xls", sheet = 5)
+df3 <- read.xls("WHR2018Chapter2OnlineData.xls", sheet = 2)
+
+df_2017 <- as.data.frame(subset(df, df$year == 2017))
+df_2017_nscale <- as.data.frame(subset(df, df$year == 2017))
+library(VIM)
+library(ggfortify)
+library(factoextra)
+library(cluster)
+library(tidyr)
+library(ggplot2)
+library(corrplot)
+library(dplyr)
+```
+
+## Problem Statement
+
+We are trying to understand the happiness distribution of the world. We would find out the relationships between happiness and economy and health indices to answer the question that which factors are significantly related to happiness. Furthermore, we would explore how the factors that determine happiness are similar or different in each countries as well as in different regions. It is essential to use scientific underpinnings of measuring to understand subjective well-beings around the world. 
+
+## Data Description
+We use the The World Happiness Report 2018 from the United Nations, which is a landmark survey of the state of global happiness. Based on the pooled results from Gallup Would Poll surveys, the World Happiness Report includes its usual ranking of the levels and changes in happiness around the world. The complete online data set is included in Chapter 2 of the Report. The first sheet includes the data of 17 variables for the recent decade of 141 countries. But here we only use the data of 141 countries in 2017 to process an analysis (df1).
+```{r}
+dplyr::glimpse(df_2017)
+```
+In the World Happiness Report, the following 10 variables are included in the analyses (Technical Box 1 and Appendix Table A1):
+
+Life Ladder: self-anchoring score of an individual. On which step of the ladder people would say that they personally feels they stand at this time. On the ladder, 0 represents the worst possible life and 10 represents the best possible life.
+
+Log GDP per capita：GDP per capita growth measurement. GDP per capita  in terms of Purchasing Power Parity (PPP) adjusted to constant 2011 international dollars, taken from the World Development Indicators (WDI) released by the World Bank in September 2017.
+
+Social support:the share of people reporting that they have friends or relatives whom they can count on help in case of need.
+
+Healthy life expectancy at birth: constructed based on data from the World Health Organization (WHO) and WDI. 
+
+Freedom to make life choices: the percentage of people answering "yes" to the question whether they are satisfied or dissatisfied with your freedom to choose what you do with your life. 
+
+Generosity: the residual of regressing the national average of GWP responses
+to the question “Have you donated money to a charity in the past month?” on GDP per capita. 
+
+Perceptions of corruption: the percentage of people answering "yes" to the question whether corruption widespread throughout the government in this country, or not and whether corruption is widespread within businesses or not.
+
+Positive affect: defined as the average of laughter and enjoyment for other waves where the happiness question was not asked. 
+
+Negative affect:  defined as the average of previous-day affect measures for worry, sadness, and anger for all waves.
+
+Confidence in national government: the percentage of people answering "yes" to the question whether they have confidence in the national government of the country.
+ 
+The online dataset also includes Democratic Quality, Delivery Quality, Standard deviation of ladder by country-year, Standard deviation/Mean of ladder by country-year, GINI index (World Bank estimate), GINI index (World Bank estimate), average 2000-15 gini of household income. GINI index is a measure of statistical dispersion that is intended to represent the income or wealth distribution of the country's residents, which is also a measurement of inequality.
+
+The Report also includes the dataset of region indicator, the average and standard deviation of Life ladder, Log of GDP per person, GDP per person, Healthy life expectancy, Social support, Freedom to make life choices,Generosity (without adjustment for GDP per person),Perceptions of corruption variables of each country. The region indicator includes Sub-Saharan Africa, East Asia, North America and ANZ, Western Europe, South Asia, Southeast Asia,Central and Eastern Europe, Middle East and North Africa, Commonwealth of Independent States, and Latin America and Caribbean. We import this dataset as df2.
+
+We also import the Happiness score as an separate data frame (df3).
+
+## Data Preprocessing
+
+Describe any variable transformations, treatment of missing values, recording and any other data manipulations completed.
+
+First, we use the mymiss function to see the patterns of missing data.
+```{r, message=FALSE}
+aggr(df_2017)
+
+mymiss <- function(x)sum(is.na(x))
+
+sapply(df_2017, mymiss)
+```
+Due to the high number of missing data in GINI index (World Bank estimate) and that the data imputation might lead to wrong conclusion, we are not considering this index. We are first analyzing the factors of Happiness based on the survey questions and economy indices, we do not include "GINI index (World Bank estimate), average 2000-15" (Column 13) and	"gini of household income reported in Gallup, by wp5-year" 
+(Column 14).Then we omit the "Happiness score", since we are doing further analyses on the factors contributing to the happiness score. 
+```{r, message=FALSE}
+df_2017_nscale <- df_2017_nscale[, -13:-14]
+df_2017_nscale <- df_2017_nscale[, -15]
+df_2017_nscale <- df_2017_nscale[, -13:-14]
+
+df_2017 <- df_2017[, -13:-14]
+df_2017 <- df_2017[, -15]
+df_2017 <- df_2017[, -13:-14]
+```
+
+We've named the data frame "df_2017_nscale" to make it clear that this data frame is scaled and standardized in future analysis. Now we need to make sure the data is scaled to process further analyses. Since each country has its owe status in economy and unique responses in those survey questions, we are not imputing missing data. Instead, we omit the countries (observations) with missing data. We still have 113 countries (observations) that have complete data to work on.
+```{r, message=FALSE}
+df_2017$Healthy.life.expectancy.at.birth <- scale(df_2017$Healthy.life.expectancy.at.birth)
+df_2017$Life.Ladder <- scale(df_2017$Life.Ladder)
+df_2017$Log.GDP.per.capita <- scale(df_2017$Log.GDP.per.capita)
+df_2017_omit1 <- na.omit(df_2017)
+df_2017_omit <- na.omit(df_2017)
+```
+We then use the region indicator included data and calculate the means of the countries in this region to create the data frame in terms of each region.
+```{r, message=FALSE}
+df_region <- merge(df, df2)
+df_region <- df_region[, 1:20]
+df_region <- as.data.frame(subset(df_region, df_region$year == 2017))
+df_region <- df_region[, -17]
+df_region <- df_region[, -13:-14]
+df_region <- df_region[, -10:-11]
+df_region <- df_region[, -14]
+df_region <- df_region[, -11:-12]
+df_region <- na.omit(df_region)
+
+df_region <- aggregate(df_region[,3:11], list(df_region$Region.indicator), mean)
+```  
+
+## Statistical Approaches and Results
+
+### Correlation Matrix
+We want to find out how those contributors to the happiness index are related to each other. Based on the data of 2017, the correlation matrix would be a good way to visualize these relations. The larger the circle, the more the corresponding variables are related to each other. Blue means a positive relation, and red means a negative relation.
+```{r corr, message=FALSE}
+df_2017_nscale2 <- merge(df_2017_nscale, df3)
+df_2017_nscale2 <- df_2017_nscale2[,1:15]
+df_2017_nscale2<- na.omit(df_2017_nscale)
+
+corr_data <- df_2017_nscale2 %>%
+  group_by(Life.Ladder,Log.GDP.per.capita,
+         Healthy.life.expectancy.at.birth,Social.support,Freedom.to.make.life.choices,
+         Generosity, Perceptions.of.corruption, Confidence.in.national.government, 
+         GINI.index..World.Bank.estimate...average.2000.15)
+
+corr_data <- corr_data[, -14]
+corr_data <- corr_data[, -10:-11]
+
+colnames(corr_data)[11] <- "GINI.Index"
+colnames(corr_data)[10] <- "Confidence.in.Gov"
+colnames(corr_data)[6] <- "Life.Expectancy"
+colnames(corr_data)[7] <- "Freedom"
+colnames(corr_data)[9] <- "Corruption"
+colnames(corr_data)[4] <- "GDP Per Capita"
+
+corrplot(cor(corr_data[,3:11]), tl.cex = 0.8)
+```
+
+From the correlation matrix, we can see some interesting correlations:
+
+The top left is where most blue and large circles are. Life Ladder, GDP Per Capita, Social support and Life Expectancy are highly correlated to each other. Freedom is also positively related to those 4 variables but with weaker correlation. 
+
+The red circles are mainly at the bottom left (symmetrical with the top right). Corruption, Confidence in Government and GINI index are negatively correlated to each other. Notice that Life Expectancy is also negatively correlated to those three variables. 
+
+Freedom is negatively correlated with Corruption, which is the only negative one among the correlations between Freedom and other variables.
+
+Generosity is not significantly correlated to most of the variables (Life ladder, GDP Per Capita, Social Support. It is negatively related to Corruption and positively related to Confidence in Government. Generosity is also weakly positively related to the GINI index.
+
+Corruption is mostly negatively related to other variables except GINI index. Higher Corruption means higher GINI Index, which is higher income inequality.
+
+The correlation between GINI Index and Confidence in Government is very weak, which means that GINI Index is barely correlated Confidence in Government.
+
+### Principle Component Analysis
+It is fairly difficult to visualize all the variables one by one for all the countries. But using principle component analysis, we are able to reduce redundancy in the variables and hence reduce the dimensionality of data visualization. We use only less number of variables, which are principle components, to replace the large number of original variables. And those principle components are linear combination of original variables, which keeps the characteristics of each observation. First, we use the scree plot to find the optimal number of principle components. The red line represents the cut-off, and we keep 3 principle components.
+```{r pc analysis, message=FALSE}
+rownames(df_2017_omit) <- df_2017_omit[,1]
+df_2017_omit[,1] <- NULL
+fit <- prcomp(x = df_2017_omit[,-1], center = TRUE, scale = TRUE)
+summary(fit)
+
+screeplot(fit, npcs = 12, type = "lines")
+abline(h = 1, col = "red")
+```
+Using three principle components, we approximate the happiness score with a linear model. We see that PC1 and PC3 have high significance and thus we use scatter plot to visualize PC1 and PC3, and each dot representing a country. The bi-plot of PC1 and PC3, and the number represents the country (the line number is corresponding to the original df1). However, the bi-plot is not very clear because of the large number of observations and variables. We then only create a scatter plot with PC1 and PC3, and each dot represent a country. 
+```{r pc analysis 2, message=FALSE,fig.width=15, fig.height=15}
+newdf <- data.frame(country = df_2017_omit[,1], fit$x[,1:3])
+#rownames(df3) <- df3$country
+#df3$country <- NULL
+#newdf <- merge(newdf, df3)
+#newdf <- newdf[,1:5]
+#fit.lm <- lm(Happiness.score ~ .,newdf[,-1])
+#summary(fit.lm)
+
+#rownames(newdf) <- newdf$country
+newdf[,1] <- NULL
+
+biplot(fit)
+```
+However, the bi-plot is not very clear because of the large number of observations and variables. But we can still see the correlation of the variables here similar to those we found in the correlation matrix. While pointing to the The smaller angle between two variables means a more positive correlation. If the angle is over 90 degree, it means that the larger the angle, the stronger the negative correlation.
+
+We then only create a scatter plot with PC1 and PC3, and each dot represent a country. Notice that there are areas that dots are more concentrated, which means that the distance between two dots are small and they are similar. Therefore it is interesting to conduct cluster analysis.
+```{r pc analysis 3, message=FALSE}
+plot(fit$x[,1],fit$x[,3],xlab="PC1", ylab="PC3", main="Principle Components",pch=20)
+```
+
+### Cluster Analysis
+#### Cluster Analysis of Countries
+As mentioned above, we would like to find out what countries are similar in terms of the factors of happiness. The similar countries would be in one cluster. Similar to principle component analysis, we need to find the optimal number of cluster (under the k-means clustering method). From the graph, we see that there is a "turning point" at 3, where the slopes become smoother. 
+```{r cluster0, message=FALSE}
+fviz_nbclust(df_2017_omit[, -1], FUN = kmeans, method = "wss")
+```
+Thus, we conduct the later analysis by using 3 clusters. We can see three clusters and corresponding profiles. More clear plots are shown in the next section.
+```{r cluster11, message=FALSE,fig.width=10, fig.height=10}
+fit.km <- kmeans(df_2017_omit[, -1], 3, nstart = 25)
+fviz_cluster(fit.km, df_2017_omit[, -1])
+
+means <- as.data.frame(fit.km$centers)
+means$cluster <- row.names(means)
+
+df_long <- gather(means, key = "variable", value = "value", 
+                  Life.Ladder:gini.of.household.income.reported.in.Gallup..by.wp5.year)
+
+ggplot(data = df_long, aes(x = variable, y = value, group = cluster, color = cluster, shape = cluster)) + 
+  geom_point(size = 3) + 
+  geom_line(size = 1) + 
+  labs(title = "Profiles for Happiness Clusters") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+```
+```{r}
+fit.km$cluster
+```
+
+Now we get which cluster each country is in. From the Profiles of Happiness Clusters, we see that the main differentiation occurs at healthy life expectancy at birth, life ladder, and log GDP per capita. The healthy life expectancy at birth creates the largest gap between Cluster 1 (Orange line, eg. the United States, Austria, Iceland, Japan, etc.) and Cluster 2 (Green line, eg. Tanzania, Laos, Ethiopia, Colombia, etc.). And Cluster 3 (Blue line) is in the middle of the other two clusters. 
+
+Moreover, Cluster 1 (Orange line) countries have relatively high freedom to make life choices, low perceptions of corruption, high positive effects and high social support. Cluster 2 (Green line) countries have relatively high confidence in national government, high GINI Index and relatively low social support. Cluster 3 (Blue line) has relatively the lowest generosity, high perceptions of corruption.
+
+Since we can have different number of clusters, we adapt another clustering method to better show the clusters when choosing different number of clusters or different levels. Hierarchical clustering is based on the euclidean distance of all variables of each country(observation). The results of this method, hierarchical clustering, is presented in a dendrogram.
+
+```{r cluster22, message=FALSE,fig.width=15, fig.height=10}
+d <- dist(df_2017_omit[, -1], method = "euclidean")
+fit.hc <- hclust(d, method = "complete")
+plot(fit.hc, hang = -1, cex = 0.8)
+rect.hclust(fit.hc, k = 3, border = "red")
+```
+Note that some countries that are close to each other on the dendrogram are also closed geographically. For example, on the left hand side, there are mainly African countries. Then Japan and South Korea are next to each other. In the middle are European countries. In this case, we can do further analysis on the more general regions.
+
+#### Cluster Analysis of Regions
+Similarly, we run cluster analysis for different regions to get a group of more general clusters. Since there are only 10 variables (observations), we process the hierarchical clustering first and get the dendagram. We then use k-means clustering to find the profiles of the different clusters. 
+```{r}
+df_region_scale1 <- data.frame(scale(df_region))
+
+rownames(df_region_scale1) <- df_region_scale1$Group.1
+df_region_scale1$Group.1 <- NULL
+d_region <- dist(df_region_scale1, method = "euclidean")
+fit.hc_region <- hclust(d_region, method = "complete")
+
+plot(fit.hc_region, hang = -1, cex = 0.8)
+rect.hclust(fit.hc_region, k = 4, border = "red")
+```
+From the dendrogram, we see that Sub-Saharan Africa is not close to other regions. While North America and ANZ (Australia and New Zealand) is close to Western Europe, those two regions are actually pretty far away from each other geographically. The next cluster includes South Asia and Southeast Asia, which are geometrically close. Another cluster includes East Asia, Central and Eastern Europe, Middle East and North Africa, Commonwealth of Independent States, and Latin America and Caribbean.
+
+We then use k-means clustering to find the profiles of the different clusters, using 4 clusters. (Readers are also able to find out the k-means clustering by different numbers of clusters.)
+```{r cluster3, message=FALSE}
+# by region
+rownames(df_region) <- df_region$Group.1
+df_region[,1] <- NULL
+df_region_scale <- data.frame(scale(df_region))
+
+fit.km_region <- kmeans(df_region_scale, 4, nstart = 25)
+
+fviz_cluster(fit.km_region, df_region_scale)
+
+means_region <- as.data.frame(fit.km_region$centers)
+means_region$cluster <- row.names(means_region)
+
+df_long_region <- gather(means_region, key = "variable", value = "value", 
+                  Life.Ladder:GINI.index..World.Bank.estimate...average.2000.15)
+
+ggplot(data = df_long_region, aes(x = variable, y = value, group = cluster, color = cluster, shape = cluster)) + 
+  geom_point(size = 3) + 
+  geom_line(size = 1) + 
+  labs(title = "Profiles for Happiness Clusters by Region") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+```{r}
+fit.km_region$cluster
+```
+
+From the profiles of clusters by region, we see larger differences compared to the profiles of clusters by country. But we can see similar results. 
+
+Cluster 4 (Southeast Asia, South Asia, Sub-Saharan Africa) has high confidence in national government, low healthy life expectancy at birth, low life ladder, low log GDP per capita adn low social support, which is similar to Cluster 2 in the analysis by country. This cluster also have relatively high generosity, only lower than Cluster 1 (America and ANZ, Western Europe). 
+
+Cluster 3 (Middle East and North Africa, Central Eastern Europe, East Asia, Commonwealth of Independent States) has low freedom to make life choice and high level of perceptions of corruption. Other variables of Cluster 3 are in between peaks, which is similar to Cluster 3 in the previous analysis by country.
+
+Cluster 2 only includes Latin America and Caribbean, which is pretty unique in all the regions. It has low generosity, high GINI index. Other variables are mostly close to Cluster 3.
+
+Cluster 1 (America and ANZ, Western Europe) has high freedom, high generosity, high healthy expectancy, high life ladder, high log GDP, low perceptions of corruption and high social support. This characteristics are close to Cluster 1 in our previous analysis by country.
+
+## Discussion
+What did you find? What are the implications for policy? What suggestions do you have for other
+researchers who want to take your work further?
+
+According to the correlation matrix, principle component analysis, we find the strong correlation among Life Ladder, GDP Per Capita, Social support and Life Expectancy. It is surprising but also reasonable to see that individuals' health, supports from family and friends and current status of life are highly related to the country's GDP per capita. If the national government would boost its residents' happiness, a better economy is essential. Another important aspect for the government to raise the happiness ranking is to solve the corruption issue that has a negative influence on the the happiness of its citizens. 
+
+From the cluster analyses by country and region, we see the similarity of countries that are geographically close to each other, especially in Asia and Africa. This may be because of climates, trades, immigration, religion, even culture and history. But when one country in the region starts to develop faster, its geographical neighbors may follow the growth. Neighbor countries should corporate with each other to seek higher economy development, as well as better well-being, for example, improvement of medical technology and healthcare system. 
+
+Further research can find out more how those variables change over the years and how the changes are related with the changes in happiness level, which is able to provide policy-makers more insights.
+
+
+## References
+Helliwell, J., Layard, R., & Sachs, J. (2018). World Happiness Report 2018, New York: Sustainable Development Solutions Network.
